@@ -1,0 +1,629 @@
+{
+  "schema_version": 1,
+  "project": "Spindle",
+  "upstream": {
+    "repository": "https://github.com/Jason-Vaughan/TangleClaw",
+    "commit": "3162811af43714b6d83ef4a43e6602adaead2785",
+    "version": "5.71.0"
+  },
+  "review_date": "2026-11-07",
+  "review_timezone": "America/Los_Angeles",
+  "basis": [
+    "docs/review-sessions-engines.md",
+    "docs/review-coordination-store.md",
+    "docs/review-api-ui-platform.md"
+  ],
+  "status_policy": "All requirements are planned. Presence of foundation code or a helper does not establish full requirement acceptance. Change status only with linked implementation and execution evidence.",
+  "scope_note": "Covers all 22 audit parity domains plus persistence. Requirements may strengthen or explicitly supersede upstream behavior; source anchors identify the upstream contract, not proof that proposed guarantees already exist.",
+  "requirements": [
+    {
+      "id": "PAR-001",
+      "domain": "projects_configuration",
+      "requirement": "Preserve project creation, attachment, archive, detachment, groups and validated settings.",
+      "upstream_source": [
+        "lib/projects.js",
+        "lib/routes/config.js"
+      ],
+      "status": "planned",
+      "acceptance": "Import representative projects; reject invalid settings; archive blocks launch; unrelated repository files remain unchanged."
+    },
+    {
+      "id": "PAR-002",
+      "domain": "projects_configuration",
+      "requirement": "Respect configuration ownership and hands-off repository mode.",
+      "upstream_source": [
+        "lib/store.js:349",
+        "lib/store.js:396",
+        "FEATURES.md"
+      ],
+      "status": "planned",
+      "acceptance": "Seed only owned configuration; preserve operator edits; hands-off mode performs no unauthorized repository mutations."
+    },
+    {
+      "id": "PAR-003",
+      "domain": "engines",
+      "requirement": "Represent versioned engine capabilities, supported modes, models and local versus remote execution.",
+      "upstream_source": [
+        "lib/engines.js:604",
+        "lib/engines.js:1932"
+      ],
+      "status": "planned",
+      "acceptance": "Run an engine/version matrix; unsupported capabilities return explicit refusals; effective mode is recorded separately from requested mode."
+    },
+    {
+      "id": "PAR-004",
+      "domain": "engines",
+      "requirement": "Preserve managed configuration boundaries and inactive carrier retirement.",
+      "upstream_source": [
+        "lib/engines.js:3929",
+        "lib/engines.js:4520"
+      ],
+      "status": "planned",
+      "acceptance": "Switch engines with user-edited config; retain unmanaged text and remove only owned obsolete carriers."
+    },
+    {
+      "id": "PAR-005",
+      "domain": "engines",
+      "requirement": "Reconcile native protocol startup, reconnect and indeterminate turn outcomes.",
+      "upstream_source": [
+        "lib/startup-control-codex.js:866",
+        "lib/startup-control-codex.js:2424"
+      ],
+      "status": "planned",
+      "acceptance": "Version mismatch fails explicitly; reconnect reconciles thread state; uncertain startup never silently duplicates a turn; model admission precedes ordinary work."
+    },
+    {
+      "id": "PAR-006",
+      "domain": "sessions_terminals",
+      "requirement": "Launch through durable intent, stable identity and explicit failure compensation.",
+      "upstream_source": [
+        "lib/sessions.js:343",
+        "lib/sessions.js:850"
+      ],
+      "status": "planned",
+      "acceptance": "Concurrent same-ID launch creates at most one process; conflicting payload is rejected; spawn or persistence failures leave a recorded outcome and cleanup evidence."
+    },
+    {
+      "id": "PAR-007",
+      "domain": "sessions_terminals",
+      "requirement": "Support attach, input, resize, capture, disconnect and reconnect with bounded buffers.",
+      "upstream_source": [
+        "lib/tmux.js:200",
+        "lib/tmux.js:1187",
+        "server.js:7823"
+      ],
+      "status": "planned",
+      "acceptance": "Slow/no readers do not cause unbounded memory; reconnect returns retained output or an explicit gap; Unicode, resize and EOF behavior are tested."
+    },
+    {
+      "id": "PAR-008",
+      "domain": "sessions_terminals",
+      "requirement": "Distinguish API restart survival, host failure and forced cancellation from successful finalization.",
+      "upstream_source": [
+        "lib/sessions.js:6360",
+        "lib/sessions.js:8478",
+        "lib/session-finalize.js:276"
+      ],
+      "status": "planned",
+      "acceptance": "API restart preserves the terminal; host failure reports interruption; stale cancellation cannot affect a replacement; unfinished obligations block successful finalization."
+    },
+    {
+      "id": "PAR-009",
+      "domain": "sessions_terminals",
+      "requirement": "Preserve project-scoped uploads and prevent path or memory-boundary violations.",
+      "upstream_source": [
+        "lib/uploads.js:82",
+        "lib/uploads.js:147"
+      ],
+      "status": "planned",
+      "acceptance": "Reject traversal, symlink escape, wrong-project access and oversized payloads; verify collisions and interrupted writes without corrupting prior files."
+    },
+    {
+      "id": "PAR-010",
+      "domain": "launch_sequencing",
+      "requirement": "Bind ordered context pages and acknowledgments to exact content, revision and launch.",
+      "upstream_source": [
+        "lib/launch-sequence.js:574",
+        "lib/launch-sequence.js:1123"
+      ],
+      "status": "planned",
+      "acceptance": "Reject stale revision, wrong digest, missing page and out-of-order acknowledgment; exact legitimate replay is idempotent."
+    },
+    {
+      "id": "PAR-011",
+      "domain": "launch_sequencing",
+      "requirement": "Separate ready initialization, model admission, authentication and task authority.",
+      "upstream_source": [
+        "lib/launch-sequence.js:1714",
+        "lib/launch-binding-guard.js:321",
+        "lib/sessions.js:4651"
+      ],
+      "status": "planned",
+      "acceptance": "READY cannot grant operator authority; failed preflight or pending model verification blocks work; old launch IDs cannot mutate replacements."
+    },
+    {
+      "id": "PAR-012",
+      "domain": "launch_sequencing",
+      "requirement": "Guard automated terminal injection against dialogs, drafts and uncertain send outcomes.",
+      "upstream_source": [
+        "lib/startup-dialog.js:976",
+        "lib/launch-pane-writer.js:1",
+        "lib/tmux.js:1187"
+      ],
+      "status": "planned",
+      "acceptance": "Busy, unknown or partially drawn composer refuses unsafe injection; raw operator input remains distinct; lost post-send response cannot trigger blind duplicate delivery."
+    },
+    {
+      "id": "PAR-013",
+      "domain": "rules_learnings",
+      "requirement": "Track stored, rendered and attested-delivered rule versions separately.",
+      "upstream_source": [
+        "lib/session-rules-refresh.js:4",
+        "lib/session-rules-channel.js:483"
+      ],
+      "status": "planned",
+      "acceptance": "Rule retirement updates authority without inventing delivery; omitted rules and empty rule sets remain explicit; disabled hooks stay disabled."
+    },
+    {
+      "id": "PAR-014",
+      "domain": "rules_learnings",
+      "requirement": "Preserve proposals, operator approval, history, promotion and rollback.",
+      "upstream_source": [
+        "lib/wrap-steps/rule-proposal.js",
+        "lib/store/session-rules.js",
+        "server.js:3749"
+      ],
+      "status": "planned",
+      "acceptance": "Unauthorized promotion fails; approved changes retain provenance and rollback history; engine delivery receipts identify the actual version."
+    },
+    {
+      "id": "PAR-015",
+      "domain": "continuity_history",
+      "requirement": "Publish handoffs with exact-byte digests and reconciled filesystem/database states.",
+      "upstream_source": [
+        "lib/handoff-lockfile.js:76",
+        "lib/handoff-lockfile.js:106",
+        "lib/handoff-publish.js:57"
+      ],
+      "status": "planned",
+      "acceptance": "Crash at staging, rename and database publication boundaries yields deterministic reconciliation; unreadable is distinct from absent; retries preserve publication identity."
+    },
+    {
+      "id": "PAR-016",
+      "domain": "continuity_history",
+      "requirement": "Preserve transcripts, summaries, memory, provenance and bounded history search.",
+      "upstream_source": [
+        "lib/store/handoffs.js",
+        "public/session-history-ui.js",
+        "public/history-drawer.js"
+      ],
+      "status": "planned",
+      "acceptance": "Fixture import/export retains source attribution and content; large-history search stays bounded and returns explicit partial/unsupported records."
+    },
+    {
+      "id": "PAR-017",
+      "domain": "medusa",
+      "requirement": "Persist send intent, external identity and explicit uncertain delivery outcomes.",
+      "upstream_source": [
+        "lib/medusa-exchanges.js:20",
+        "lib/medusa-exchanges.js:592"
+      ],
+      "status": "planned",
+      "acceptance": "Crash after remote acceptance but before local binding yields unknown outcome; retry occurs only under a proven remote idempotency contract."
+    },
+    {
+      "id": "PAR-018",
+      "domain": "medusa",
+      "requirement": "Keep delivered, read, acknowledged, replied and terminal facts distinct under reordering.",
+      "upstream_source": [
+        "lib/medusa-exchanges.js:760",
+        "lib/medusa-exchanges.js:827",
+        "lib/medusa-listener.js:283"
+      ],
+      "status": "planned",
+      "acceptance": "Duplicate/out-of-order facts produce stable projections; dashboard viewing does not acknowledge as an agent; reply obligations survive acknowledgments and restart."
+    },
+    {
+      "id": "PAR-019",
+      "domain": "workload_fleet",
+      "requirement": "Derive workload identity and freshness from verified server context.",
+      "upstream_source": [
+        "lib/workload.js:4",
+        "lib/workload-compose.js:71"
+      ],
+      "status": "planned",
+      "acceptance": "Reject spoofed identity and expired/previous-launch receipts; disclose the freshness reason and source of each observation."
+    },
+    {
+      "id": "PAR-020",
+      "domain": "workload_fleet",
+      "requirement": "Separate observed idle from verified availability and safe-to-clear.",
+      "upstream_source": [
+        "lib/workload-compose.js:119",
+        "lib/activity-observer.js:135"
+      ],
+      "status": "planned",
+      "acceptance": "Idle alone never authorizes dispatch or clearing; unknown remains unknown; observation budgets are fair under slow terminal probes."
+    },
+    {
+      "id": "PAR-021",
+      "domain": "control_authority",
+      "requirement": "Commit HOLD and STOP with notification intent before attempting transport.",
+      "upstream_source": [
+        "lib/control-state.js:4",
+        "lib/control-gate.js:4"
+      ],
+      "status": "planned",
+      "acceptance": "Dropped notification and restart preserve mutation refusal; pending notification remains retryable; listener loss cannot remove STOP."
+    },
+    {
+      "id": "PAR-022",
+      "domain": "control_authority",
+      "requirement": "Release only named holds with current generation and verified actor authority.",
+      "upstream_source": [
+        "lib/control-state.js:727",
+        "lib/control-state.js:762",
+        "lib/control-auth.js:4"
+      ],
+      "status": "planned",
+      "acceptance": "Stale release fails; unrelated holds remain; a role label or sender string cannot substitute for authenticated authority."
+    },
+    {
+      "id": "PAR-023",
+      "domain": "coordinators",
+      "requirement": "Preserve master/advisor roles and generation-bound delegated responsibilities.",
+      "upstream_source": [
+        "lib/lifecycle-handoff.js:38",
+        "lib/routes/tc.js:749"
+      ],
+      "status": "planned",
+      "acceptance": "Role revocation or generation change invalidates prior delegation; concurrent delegates cannot both become authorized successors."
+    },
+    {
+      "id": "PAR-024",
+      "domain": "coordinators",
+      "requirement": "Recover checkpoint, successor launch, reconciliation and takeover as durable transitions.",
+      "upstream_source": [
+        "lib/lifecycle-handoff.js:18",
+        "lib/lifecycle-handoff.js:62"
+      ],
+      "status": "planned",
+      "acceptance": "Crash during rotation resumes with one identified successor or explicit uncertainty; copied digest alone cannot attest takeover; blocked handoff retains checkpoint."
+    },
+    {
+      "id": "PAR-025",
+      "domain": "wrap_automation",
+      "requirement": "Preserve ordered default workflow, overrides and explicit capability outcomes.",
+      "upstream_source": [
+        "lib/wrap-default-pipeline.js",
+        "lib/wrap-pipeline.js:60"
+      ],
+      "status": "planned",
+      "acceptance": "Map every one of the 18 default steps; unavailable/not-applicable differ from success; dependency order is checked; missing capability withholds merge/release authority."
+    },
+    {
+      "id": "PAR-026",
+      "domain": "wrap_automation",
+      "requirement": "Persist step attempts and reconcile external effects before retry, resume or cancellation.",
+      "upstream_source": [
+        "lib/wrap-pipeline.js:87",
+        "lib/wrap-pipeline.js:490",
+        "lib/wrap-steps/commit.js:38"
+      ],
+      "status": "planned",
+      "acceptance": "Inject interruption at each effect boundary; capture reuse obeys identity/age restrictions; uncertain commit timeout inspects actual repository state before retry."
+    },
+    {
+      "id": "PAR-027",
+      "domain": "git_reviews_merge",
+      "requirement": "Preserve unrelated changes and explicit path ownership across Git operations.",
+      "upstream_source": [
+        "lib/wrap-steps/commit.js:87",
+        "lib/checkout-state.js",
+        "lib/update-applier.js:368"
+      ],
+      "status": "planned",
+      "acceptance": "Dirty, detached, concurrent-edit and untracked fixtures retain unrelated work; staged paths are explicit; hooks are honored."
+    },
+    {
+      "id": "PAR-028",
+      "domain": "git_reviews_merge",
+      "requirement": "Keep commit, push, PR, checks, merge and publication as separate verified outcomes.",
+      "upstream_source": [
+        "lib/wrap-steps/commit.js:711",
+        "lib/merge-queue-github.js"
+      ],
+      "status": "planned",
+      "acceptance": "Control change between commit and push withholds push without losing commit; remote races and missing/stale checks prevent false merge completion."
+    },
+    {
+      "id": "PAR-029",
+      "domain": "shared_documents",
+      "requirement": "Preserve group/project access, locks, revisions and document notifications.",
+      "upstream_source": [
+        "lib/shared-docs.js",
+        "lib/shared-docs-access.js",
+        "lib/shared-docs-http.js"
+      ],
+      "status": "planned",
+      "acceptance": "Wrong-project access is denied; stale-base writes fail; lock expiry/concurrent edits preserve revisions and attestation provenance."
+    },
+    {
+      "id": "PAR-030",
+      "domain": "port_management",
+      "requirement": "Model host-scoped ownership, leases, heartbeat and expiry without claiming a bind reservation.",
+      "upstream_source": [
+        "lib/porthub.js",
+        "lib/port-scanner.js"
+      ],
+      "status": "planned",
+      "acceptance": "Conflicting leases and real socket bind races report accurately; heartbeat/expiry cannot transfer ownership silently; ingress claims remain distinct."
+    },
+    {
+      "id": "PAR-031",
+      "domain": "authentication",
+      "requirement": "Implement explicit auth states and canonical route exemptions with fail-closed unreadable state.",
+      "upstream_source": [
+        "lib/auth-gate.js:35",
+        "lib/auth-gate.js:152",
+        "lib/auth-gate.js:657"
+      ],
+      "status": "planned",
+      "acceptance": "Exercise every state/path/method combination including encoded aliases; unreadable configuration cannot open access; first-account setup closes after account creation."
+    },
+    {
+      "id": "PAR-032",
+      "domain": "authentication",
+      "requirement": "Preserve account sessions, expiry, revocation, recovery and CSRF guarantees.",
+      "upstream_source": [
+        "lib/auth-session.js:168",
+        "lib/auth-session.js:200",
+        "lib/auth-session.js:306"
+      ],
+      "status": "planned",
+      "acceptance": "Test session rotation, logout CSRF, concurrent recovery and single-use codes; credentials never leak to proxy targets or client-visible diagnostics."
+    },
+    {
+      "id": "PAR-033",
+      "domain": "authentication",
+      "requirement": "Apply consistent authorization to HTTP, WebSocket and local-machine callers.",
+      "upstream_source": [
+        "server.js:7689",
+        "server.js:8254",
+        "server.js:8295",
+        "lib/auth-gate.js:545"
+      ],
+      "status": "planned",
+      "acceptance": "Cross-origin/unauthenticated upgrades fail; proxied loopback is not a local principal; signed-in operator proof and launch binding remain separate requirements."
+    },
+    {
+      "id": "PAR-034",
+      "domain": "openclaw_ssh",
+      "requirement": "Preserve connection registry, discovery, tunnels, host fallback and device approval.",
+      "upstream_source": [
+        "lib/routes/openclaw.js:323",
+        "lib/routes/openclaw.js:627",
+        "lib/routes/openclaw.js:717",
+        "lib/openclaw-remote.js:179"
+      ],
+      "status": "planned",
+      "acceptance": "Exercise remote disconnect, DNS change, rekey, black-holed SSH and partial startup; unknown service health is not reported as healthy."
+    },
+    {
+      "id": "PAR-035",
+      "domain": "openclaw_ssh",
+      "requirement": "Protect proxy credentials and sanitize HTTP/WebSocket attribution.",
+      "upstream_source": [
+        "lib/routes/openclaw.js:186",
+        "lib/routes/openclaw.js:226"
+      ],
+      "status": "planned",
+      "acceptance": "Canary secrets never reach browser payloads/logs/other origins; HTTP and upgrade policy agree; gateway identity and telemetry survive reconnection."
+    },
+    {
+      "id": "PAR-036",
+      "domain": "operator_bridge",
+      "requirement": "Keep operator communication opt-in with scoped routing and confirmation.",
+      "upstream_source": [
+        "lib/bridge-helper/discord-gateway.js",
+        "lib/bridge-confirmation.js",
+        "lib/bridge-principal.js"
+      ],
+      "status": "planned",
+      "acceptance": "Use an opt-in staging account to verify destination, sender identity, confirmation scope and expiry; disabled bridge sends nothing."
+    },
+    {
+      "id": "PAR-037",
+      "domain": "operator_bridge",
+      "requirement": "Preserve helper reconnect and delivery uncertainty without widening authority.",
+      "upstream_source": [
+        "lib/bridge-helper/outbound.js",
+        "lib/bridge-helper/inbound.js",
+        "lib/bridge-store.js"
+      ],
+      "status": "planned",
+      "acceptance": "Restart/drop/duplicate tests retain receipts; replay cannot duplicate a confirmed action or manufacture operator approval."
+    },
+    {
+      "id": "PAR-038",
+      "domain": "audit_usage",
+      "requirement": "Preserve provenance-aware audit scores, baselines, drift and human assessment.",
+      "upstream_source": [
+        "lib/routes/audit.js:99",
+        "lib/routes/audit.js:653",
+        "lib/routes/audit.js:722"
+      ],
+      "status": "planned",
+      "acceptance": "Deterministic fixtures reproduce aggregates; malformed or stale attribution is rejected; unavailable data remains unknown rather than a healthy score."
+    },
+    {
+      "id": "PAR-039",
+      "domain": "audit_usage",
+      "requirement": "Bound retention and preserve usage-window accounting/calibration semantics.",
+      "upstream_source": [
+        "lib/routes/audit.js:745",
+        "lib/usage-windows.js"
+      ],
+      "status": "planned",
+      "acceptance": "Verify retention cutoff and retained references; window boundaries and missing provider observations do not invent usage precision."
+    },
+    {
+      "id": "PAR-040",
+      "domain": "deployment_update",
+      "requirement": "Provide tested service/process ownership on Linux, macOS and native Windows.",
+      "upstream_source": [
+        "lib/linux-systemd.js:91",
+        "lib/server-info.js:408",
+        "deploy/install.sh:22"
+      ],
+      "status": "planned",
+      "acceptance": "Fresh install/uninstall and restart pass on each claimed OS; native Windows PTY/process-tree cleanup has independent evidence; unsupported manager returns actionable status."
+    },
+    {
+      "id": "PAR-041",
+      "domain": "deployment_update",
+      "requirement": "Preserve ingress, certificate and remote-CA ownership boundaries.",
+      "upstream_source": [
+        "lib/caddy.js:422",
+        "lib/caddy.js:1300",
+        "lib/remote-ca-installer.js:49"
+      ],
+      "status": "planned",
+      "acceptance": "Customized ingress is preserved or explicitly reconciled; bad certificates/listeners do not silently expose a supposedly secure service; interrupted provisioning reports partial state."
+    },
+    {
+      "id": "PAR-042",
+      "domain": "deployment_update",
+      "requirement": "Replace checkout-based updates with explicit versioned upgrade/rollback guarantees.",
+      "upstream_source": [
+        "lib/update-applier.js:649",
+        "lib/update-applier.js:769",
+        "lib/server-info.js:264"
+      ],
+      "status": "planned",
+      "acceptance": "Interrupted upgrade, disk full and failed startup retain user files and recoverable database; newer schemas refuse unsafe downgrade; running and installed versions remain distinct."
+    },
+    {
+      "id": "PAR-043",
+      "domain": "ui_pwa",
+      "requirement": "Preserve dashboard/project/settings/history flows with generation-safe asynchronous rendering.",
+      "upstream_source": [
+        "public/ui.js:431",
+        "public/ui.js:1496",
+        "public/ui.js:1768",
+        "public/landing.js:3283"
+      ],
+      "status": "planned",
+      "acceptance": "Delayed responses never overwrite a newer selection; keyboard focus survives refresh; all parity-ledger flows are reachable through the UI."
+    },
+    {
+      "id": "PAR-044",
+      "domain": "ui_pwa",
+      "requirement": "Preserve bounded reconnect, outage escalation and terminal usability across browsers/devices.",
+      "upstream_source": [
+        "public/reconnect-policy.js:61",
+        "public/session.js:2056",
+        "public/api-helper.js:939"
+      ],
+      "status": "planned",
+      "acceptance": "Background throttling and stalled requests still escalate by elapsed time; real browser/mobile tests cover copy/paste, touch keys, viewport resize and pop-out."
+    },
+    {
+      "id": "PAR-045",
+      "domain": "ui_pwa",
+      "requirement": "Deliver coherent frontend generations and truthful cached/offline state.",
+      "upstream_source": [
+        "public/sw.js:351",
+        "public/sw.js:373",
+        "public/sw-register.js"
+      ],
+      "status": "planned",
+      "acceptance": "Upgrade an existing worker from N to N+1; missing assets/auth expiry/cache failure degrade explicitly; streaming responses are not cached as snapshots."
+    },
+    {
+      "id": "PAR-046",
+      "domain": "tooling_docs",
+      "requirement": "Preserve CLI verbs, structured failures and endpoint contracts or version their replacement.",
+      "upstream_source": [
+        "bin/tc",
+        "lib/routes/_kernel.js:20",
+        "lib/routes/_kernel.js:162"
+      ],
+      "status": "planned",
+      "acceptance": "Contract fixtures cover verbs, parameters, exit codes, JSON errors, invalid encoding and per-route size limits; old clients receive explicit compatibility errors."
+    },
+    {
+      "id": "PAR-047",
+      "domain": "tooling_docs",
+      "requirement": "Tie documentation, feature indexing and release evidence to actual shipped behavior.",
+      "upstream_source": [
+        "scripts/verify-features-index.js",
+        "scripts/docs-parity-gate.js",
+        "scripts/ci-evidence.js"
+      ],
+      "status": "planned",
+      "acceptance": "Documentation checks reject missing shipped features or unsupported claims; release evidence identifies exact commit and executed checks."
+    },
+    {
+      "id": "PAR-048",
+      "domain": "tooling_docs",
+      "requirement": "Maintain isolated test tiers and cross-platform execution evidence.",
+      "upstream_source": [
+        "scripts/test-tiers.js:5",
+        ".github/workflows/test.yml:34",
+        "scripts/test-skip-audit.js"
+      ],
+      "status": "planned",
+      "acceptance": "Pure tests cannot access real subprocesses/services; integration skips remain visible; PR validation uses least privilege and cannot certify unexecuted devices."
+    },
+    {
+      "id": "PAR-049",
+      "domain": "roadmap_sprints_resources",
+      "requirement": "Preserve mounted sprint/wave tracking, dependency and resource-lease contracts.",
+      "upstream_source": [
+        "lib/routes/sprint-wave-routes.js",
+        "lib/native-sprint-tracker.js",
+        "lib/resource-leases.js"
+      ],
+      "status": "planned",
+      "acceptance": "Concurrent resource claims, expired leases and unmet dependencies produce explicit results; tracked progress is tied to actual evidence."
+    },
+    {
+      "id": "PAR-050",
+      "domain": "roadmap_sprints_resources",
+      "requirement": "Separate shipped reachable features from helper-only modules and future roadmap commitments.",
+      "upstream_source": [
+        "FEATURES.md",
+        "public/sw.js:67",
+        "ROADMAP.md"
+      ],
+      "status": "planned",
+      "acceptance": "Each feature has an invocation trace or is labeled preparatory; future multi-user/container/fleet and hierarchy work is not marked completed parity."
+    },
+    {
+      "id": "PAR-051",
+      "domain": "persistence",
+      "requirement": "Preserve transactional decisions, constraints, triggers and domain-owned schema during migration.",
+      "upstream_source": [
+        "lib/store/_db.js:85",
+        "lib/store/_db.js:114",
+        "lib/store/_schema.js:64",
+        "lib/lifecycle-handoff.js:7"
+      ],
+      "status": "planned",
+      "acceptance": "Offline import validates rows, references, indexes and triggers; missing constraints refuse/report safely; import never writes to the original database."
+    },
+    {
+      "id": "PAR-052",
+      "domain": "persistence",
+      "requirement": "Keep durable state ownership and schema compatibility explicit.",
+      "upstream_source": [
+        "lib/store.js:349",
+        "lib/store/_schema.js:4193",
+        "lib/store/_schema.js:5141"
+      ],
+      "status": "planned",
+      "acceptance": "Only one product writes a database; a newer schema is refused before mutation; crash recovery preserves append-only facts and transaction atomicity."
+    }
+  ]
+}
