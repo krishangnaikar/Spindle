@@ -59,7 +59,7 @@ impl Fixture {
     async fn ready(&self) {
         let start = Instant::now();
         loop {
-            if let Ok(reply) = host::request(&self.state, &Request::Health).await
+            if let Ok(reply) = host::request(&self.state, &Request::Health {}).await
                 && reply.ok
             {
                 return;
@@ -127,7 +127,7 @@ impl Fixture {
     async fn terminal_status(&self, id: &str) -> String {
         let start = Instant::now();
         loop {
-            let values = self.call(Request::List).await.value.unwrap();
+            let values = self.call(Request::List {}).await.value.unwrap();
             let row = values
                 .as_array()
                 .unwrap()
@@ -309,7 +309,7 @@ async fn output_flood_is_bounded_and_reports_replay_gap() {
         assert!(start.elapsed() < Duration::from_secs(5));
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    f.call(Request::Health).await;
+    f.call(Request::Health {}).await;
     f.cancel(&session).await;
 }
 
@@ -415,7 +415,7 @@ async fn ipc_rejects_oversized_frames_and_second_host() {
         assert!(start.elapsed() < Duration::from_secs(3));
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    f.call(Request::Health).await;
+    f.call(Request::Health {}).await;
     let mode = fs::metadata(f.state.join("host.sock"))
         .unwrap()
         .permissions()
@@ -443,7 +443,7 @@ async fn list_stays_bounded_with_large_launch_arguments() {
         let reply = f.call(Request::Launch { launch }).await;
         sessions.push(serde_json::from_value::<Session>(reply.value.unwrap()).unwrap());
     }
-    let reply = f.call(Request::List).await;
+    let reply = f.call(Request::List {}).await;
     assert!(serde_json::to_vec(&reply).unwrap().len() < FRAME_LIMIT);
     assert_eq!(reply.value.unwrap().as_array().unwrap().len(), 4);
     for session in sessions {
@@ -524,7 +524,7 @@ async fn gateway_bounds_idle_connections_before_parsing_bodies() {
     );
     drop(held);
     tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(api_command(&f.state, &Request::Health).await.ok);
+    assert!(api_command(&f.state, &Request::Health {}).await.ok);
     let mut slow = UnixStream::connect(f.state.join("api.sock")).await.unwrap();
     slow.write_all(b"POST /v1/command HTTP/1.1\r\nHost:")
         .await

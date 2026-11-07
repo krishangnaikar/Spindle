@@ -23,7 +23,7 @@ Install Rust through [rustup](https://rust-lang.org/tools/install/). The toolcha
 
 ```sh
 cargo build --locked
-cargo test --locked
+cargo test --locked --all-targets
 cargo clippy --locked --all-targets -- -D warnings
 cargo fmt --all -- --check
 ```
@@ -69,6 +69,23 @@ The state directory is created with mode 0700 and sockets with mode 0600. An exi
 
 `SIGINT` or `SIGTERM` to the host ends its managed sessions. Stopping only the API does not. Host crash/reboot is a different failure: the record becomes `interrupted`, and memory-only terminal history is unavailable. Never run this prototype against an upstream TangleClaw database.
 
+## Coding-agent CLIs and model APIs
+
+Use both entry points according to the work:
+
+```sh
+# Installed interactive CLI, owned by the running Linux session host:
+spindle --state-dir .state agent claude --cwd /absolute/project/path
+spindle --state-dir .state agent codex --cwd /absolute/project/path
+
+# Single-turn API request; credential already provisioned in the environment:
+spindle ask --provider openrouter --model openrouter/free --prompt-file prompt.txt
+```
+
+Claude Code/Codex retain their own CLI login. Direct OpenAI, Anthropic and OpenRouter requests use a named API-key environment variable, without reusing CLI login tokens. Direct paid-capable routes require `--allow-paid`; default routing accepts only OpenRouter free targets with zero-price constraints and no fallback. API requests currently have no tools, streaming or durable chat. Live account/subscription access has not been tested.
+
+See [provider routing](docs/provider-routing.md) for flags, authentication, optional PTY lifecycle wrapping and privacy limits. These initial adapters do not establish full engine-aware launch/recovery parity.
+
 ## Architecture
 
 ```text
@@ -79,6 +96,8 @@ HTTP over Unix socket -> private host IPC -> session host
                                             +-- bounded store mailbox -> SQLite thread
 ```
 
+- `src/engine.rs`: native CLI launch presets with CLI-owned login.
+- `src/provider.rs`: bounded direct API requests and free-only route policy.
 - `src/model.rs`: wire types, validation and byte-ring contract.
 - `src/host.rs`: private IPC, launch ownership, PTY workers, cancellation and recovery orchestration.
 - `src/store.rs`: versioned storage, legal transitions and atomic recovery.
@@ -107,6 +126,8 @@ The compatibility reference is TangleClaw v5.71.0 at `3162811af43714b6d83ef4a43e
 - [API, UI, platform and website review](docs/review-api-ui-platform.md)
 - [Machine-readable parity requirements](docs/parity-manifest.json)
 - [Protocol and acceptance contract](docs/protocol.md)
+- [Testing guide and coverage boundaries](docs/testing.md)
+- [Recorded validation](docs/validation.md)
 
 The reviews inventory the repository and inspect selected critical paths in depth. They do not certify every source line or demonstrate unexecuted platform behavior. The parity manifest deliberately keeps full-product requirements `planned`; passing this milestone's tests does not satisfy an entire parity domain.
 

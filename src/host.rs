@@ -129,8 +129,8 @@ struct Host {
 impl Host {
     async fn dispatch(&self, request: Request) -> Result<Value> {
         match request {
-            Request::Health => Ok(json!({"service":"spindle-host","protocol":1})),
-            Request::List => {
+            Request::Health {} => Ok(json!({"service":"spindle-host","protocol":1})),
+            Request::List {} => {
                 let rows = self.store.list().await?;
                 anyhow::ensure!(rows.len() <= 128, "record limit exceeded");
                 let projected:Vec<_>=rows.into_iter().map(|s|json!({"id":s.launch.id,"generation":s.generation,"status":s.status,"exit_code":s.exit_code,"error":s.error.map(bounded_error)})).collect();
@@ -668,4 +668,413 @@ pub async fn run(dir: &Path) -> Result<()> {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     bail!("host shutdown could not confirm every terminal exit")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+
+    fn private_root() -> tempfile::TempDir {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        root
+    }
+
+    async fn host() -> (tempfile::TempDir, Host) {
+        let dir = tempfile::tempdir().unwrap();
+        let host = Host {
+            store: Store::open(&dir.path().join("state.db")).await.unwrap(),
+            sessions: AsyncMutex::new(HashMap::new()),
+            launches: AsyncMutex::new(()),
+            stopping: AtomicBool::new(false),
+        };
+        (dir, host)
+    }
+    fn launch() -> Launch {
+        Launch {
+            id: uuid::Uuid::new_v4().to_string(),
+            program: "/not-executed".into(),
+            args: vec![],
+            cwd: "/".into(),
+        }
+    }
+    async fn fake_terminal(host: &Host) -> blocking::Receiver<Control> {
+        let (tx, rx) = blocking::sync_channel(1);
+        let mut ring = Ring::default();
+        ring.append(b"hello");
+        host.sessions.lock().await.insert(
+            "test".into(),
+            Live {
+                generation: "current".into(),
+                controls: tx,
+                ring: Arc::new(Mutex::new(ring)),
+            },
+        );
+        rx
+    }
+
+    #[test]
+    fn private_directory_creates_private_leaf_and_rejects_public_existing_directory() {
+        let root = private_root();
+        let leaf = root.path().join("private");
+        private_dir(&leaf).unwrap();
+        assert_eq!(std::fs::metadata(&leaf).unwrap().mode() & 0o777, 0o700);
+        std::fs::set_permissions(&leaf, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(private_dir(&leaf).is_err());
+        assert_eq!(std::fs::metadata(&leaf).unwrap().mode() & 0o777, 0o755);
+    }
+
+    #[test]
+    fn private_directory_rejects_symlink_and_unsafe_database_links() {
+        let root = private_root();
+        let real = root.path().join("real");
+        private_dir(&real).unwrap();
+        let linked = root.path().join("linked");
+        symlink(&real, &linked).unwrap();
+        assert!(private_dir(&linked).is_err());
+        let outside = root.path().join("outside");
+        std::fs::write(&outside, b"preserve").unwrap();
+        let db = real.join("state.db");
+        symlink(&outside, &db).unwrap();
+        assert!(private_dir(&real).is_err());
+        std::fs::remove_file(&db).unwrap();
+        std::fs::hard_link(&outside, &db).unwrap();
+        assert!(private_dir(&real).is_err());
+        assert_eq!(std::fs::read(&outside).unwrap(), b"preserve");
+    }
+
+    #[tokio::test]
+    async fn socket_lock_prevents_duplicate_owner_and_drop_allows_rebind() {
+        let root = private_root();
+        let (listener, guard) = bind_socket(root.path(), "test").unwrap();
+        assert_eq!(
+            std::fs::metadata(root.path().join("test.sock"))
+                .unwrap()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert!(bind_socket(root.path(), "test").is_err());
+        assert!(root.path().join("test.sock").exists());
+        drop(listener);
+        drop(guard);
+        assert!(!root.path().join("test.sock").exists());
+        let (_listener, _guard) = bind_socket(root.path(), "test").unwrap();
+    }
+
+    #[tokio::test]
+    async fn socket_bind_preserves_foreign_file_and_refuses_symlink_lock() {
+        let root = private_root();
+        let socket = root.path().join("test.sock");
+        std::fs::write(&socket, b"not a socket").unwrap();
+        assert!(bind_socket(root.path(), "test").is_err());
+        assert_eq!(std::fs::read(&socket).unwrap(), b"not a socket");
+        let target = root.path().join("target");
+        std::fs::write(&target, b"unchanged").unwrap();
+        symlink(&target, root.path().join("other.lock")).unwrap();
+        assert!(bind_socket(root.path(), "other").is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"unchanged");
+    }
+
+    #[test]
+    fn errors_preserve_short_text_and_bound_unicode_and_json_expansion() {
+        assert_eq!(bounded_error("short error".into()), "short error");
+        for text in ["a".repeat(1000), "🧵".repeat(1000), "\0\n\"\\".repeat(1000)] {
+            let bounded = bounded_error(text.clone());
+            assert!(text.starts_with(&bounded));
+            assert!(!bounded.is_empty());
+            assert!(bounded.chars().count() <= 128);
+            assert!(serde_json::to_vec(&bounded).unwrap().len() <= 256);
+        }
+    }
+
+    async fn frame(bytes: Vec<u8>) -> Result<Vec<u8>> {
+        let (mut writer, mut reader) = UnixStream::pair().unwrap();
+        let sender = tokio::spawn(async move {
+            let _ = writer.write_all(&bytes).await;
+            let _ = writer.shutdown().await;
+        });
+        let result = read_frame(&mut reader).await;
+        drop(reader);
+        sender.await.unwrap();
+        result
+    }
+
+    #[tokio::test]
+    async fn frame_boundary_accepts_exact_limit_and_rejects_larger_or_unterminated() {
+        let mut exact = vec![b'x'; FRAME_LIMIT - 1];
+        exact.push(b'\n');
+        assert_eq!(frame(exact.clone()).await.unwrap(), exact);
+        let mut too_large = vec![b'x'; FRAME_LIMIT];
+        too_large.push(b'\n');
+        assert!(frame(too_large).await.is_err());
+        assert!(frame(b"unfinished".to_vec()).await.is_err());
+        assert!(frame(vec![]).await.is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_frame_reader_times_out_without_unbounded_wait() {
+        let (_writer, mut reader) = UnixStream::pair().unwrap();
+        let before = tokio::time::Instant::now();
+        assert!(read_frame(&mut reader).await.is_err());
+        assert_eq!(before.elapsed(), Duration::from_secs(5));
+    }
+
+    #[tokio::test]
+    async fn dispatch_rejects_invalid_input_and_dimensions_before_delivery() {
+        let (_dir, host) = host().await;
+        let rx = fake_terminal(&host).await;
+        assert!(
+            host.dispatch(Request::Input {
+                id: "test".into(),
+                generation: "current".into(),
+                data: vec![0; 16385]
+            })
+            .await
+            .is_err()
+        );
+        for (rows, cols) in [(0, 80), (24, 0), (1001, 80), (24, 1001)] {
+            assert!(
+                host.dispatch(Request::Resize {
+                    id: "test".into(),
+                    generation: "current".into(),
+                    rows,
+                    cols
+                })
+                .await
+                .is_err()
+            );
+        }
+        assert!(matches!(rx.try_recv(), Err(blocking::TryRecvError::Empty)));
+    }
+
+    #[tokio::test]
+    async fn output_and_controls_require_current_terminal_generation() {
+        let (_dir, host) = host().await;
+        let rx = fake_terminal(&host).await;
+        assert!(
+            host.dispatch(Request::Output {
+                id: "missing".into(),
+                generation: "current".into(),
+                after: 0
+            })
+            .await
+            .is_err()
+        );
+        assert!(
+            host.dispatch(Request::Output {
+                id: "test".into(),
+                generation: "old".into(),
+                after: 0
+            })
+            .await
+            .is_err()
+        );
+        assert!(
+            host.dispatch(Request::Input {
+                id: "test".into(),
+                generation: "old".into(),
+                data: vec![1]
+            })
+            .await
+            .is_err()
+        );
+        assert!(matches!(rx.try_recv(), Err(blocking::TryRecvError::Empty)));
+        let output = host
+            .dispatch(Request::Output {
+                id: "test".into(),
+                generation: "current".into(),
+                after: 0,
+            })
+            .await
+            .unwrap();
+        assert_eq!(output["bytes"], json!([104, 101, 108, 108, 111]));
+        assert!(
+            host.dispatch(Request::Output {
+                id: "test".into(),
+                generation: "current".into(),
+                after: 6
+            })
+            .await
+            .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn full_or_closed_control_queue_refuses_without_waiting() {
+        let (_dir, host) = host().await;
+        let rx = fake_terminal(&host).await;
+        let (reply, _) = oneshot::channel();
+        host.sessions.lock().await["test"]
+            .controls
+            .try_send(Control::Cancel(reply))
+            .unwrap();
+        assert!(
+            host.control("test".into(), "current".into(), Control::Cancel)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("queue full")
+        );
+        drop(rx);
+        assert!(
+            host.control("test".into(), "current".into(), Control::Cancel)
+                .await
+                .is_err()
+        );
+        assert!(
+            host.control("missing".into(), "current".into(), Control::Cancel)
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_replay_requires_matching_persisted_generation() {
+        let (_dir, host) = host().await;
+        let session = host.store.create(launch()).await.unwrap();
+        host.store
+            .set(
+                &session.launch.id,
+                &session.generation,
+                Status::Failed,
+                None,
+                Some("setup failed".into()),
+            )
+            .await
+            .unwrap();
+        let value = host
+            .cancel(session.launch.id.clone(), session.generation.clone())
+            .await
+            .unwrap();
+        assert_eq!(value["delivery"], "already_ended");
+        assert!(host.cancel(session.launch.id, "old".into()).await.is_err());
+        assert!(
+            host.cancel("missing".into(), session.generation)
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn launch_stop_fence_and_replays_have_no_process_side_effects() {
+        let (_dir, host) = host().await;
+        host.stopping.store(true, Ordering::SeqCst);
+        assert!(
+            host.launch(launch())
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("stopping")
+        );
+        assert!(host.store.list().await.unwrap().is_empty());
+        host.stopping.store(false, Ordering::SeqCst);
+        let original = launch();
+        let session = host.store.create(original.clone()).await.unwrap();
+        let replay = host.launch(original.clone()).await.unwrap();
+        assert_eq!(replay["generation"], session.generation);
+        let mut conflicting = original;
+        conflicting.args.push("different".into());
+        assert!(host.launch(conflicting).await.is_err());
+        assert!(host.sessions.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn active_record_admission_limit_does_not_create_another_record() {
+        let (_dir, host) = host().await;
+        for _ in 0..MAX_SESSIONS {
+            host.store.create(launch()).await.unwrap();
+        }
+        assert!(
+            host.launch(launch())
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("live session limit")
+        );
+        assert_eq!(host.store.list().await.unwrap().len(), MAX_SESSIONS);
+    }
+
+    #[tokio::test]
+    async fn maximum_summary_fits_frame_without_exposing_command_payloads() {
+        let (_dir, host) = host().await;
+        for _ in 0..128 {
+            let mut launch = launch();
+            launch.args.push("private command payload".repeat(100));
+            let row = host.store.create(launch).await.unwrap();
+            host.store
+                .set(
+                    &row.launch.id,
+                    &row.generation,
+                    Status::Failed,
+                    None,
+                    Some("\0".repeat(1000)),
+                )
+                .await
+                .unwrap();
+        }
+        let summary = host.dispatch(Request::List {}).await.unwrap();
+        let encoded = serde_json::to_vec(&Reply::from_result(Ok(summary.clone()))).unwrap();
+        assert!(encoded.len() < FRAME_LIMIT);
+        assert_eq!(summary.as_array().unwrap().len(), 128);
+        assert!(
+            !String::from_utf8(encoded)
+                .unwrap()
+                .contains("private command payload")
+        );
+        assert!(
+            host.launch(launch())
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("record limit")
+        );
+        assert_eq!(host.store.list().await.unwrap().len(), 128);
+    }
+    #[tokio::test]
+    async fn control_waits_for_executor_receipt_and_preserves_input() {
+        let (_dir, host) = host().await;
+        let rx = fake_terminal(&host).await;
+        let data = vec![255; 16384];
+        let request = host.dispatch(Request::Input {
+            id: "test".into(),
+            generation: "current".into(),
+            data: data.clone(),
+        });
+        let executor = async {
+            let control = loop {
+                match rx.try_recv() {
+                    Ok(control) => break control,
+                    Err(blocking::TryRecvError::Empty) => tokio::task::yield_now().await,
+                    Err(error) => panic!("unexpected closed queue: {error}"),
+                }
+            };
+            match control {
+                Control::Input(actual, reply) => {
+                    assert_eq!(actual, data);
+                    reply
+                        .send(Ok(json!({"accepted":true,"delivery":"queued"})))
+                        .unwrap();
+                }
+                _ => panic!("wrong operation delivered"),
+            }
+        };
+        let (reply, ()) = tokio::join!(request, executor);
+        assert_eq!(reply.unwrap()["delivery"], "queued");
+    }
+
+    #[tokio::test]
+    async fn unanswered_control_reports_unknown_outcome_without_retrying() {
+        let (_dir, host) = host().await;
+        let rx = fake_terminal(&host).await;
+        tokio::time::pause();
+        let error = host
+            .control("test".into(), "current".into(), Control::Cancel)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("outcome unknown"));
+        assert!(matches!(rx.try_recv(), Ok(Control::Cancel(_))));
+        assert!(matches!(rx.try_recv(), Err(blocking::TryRecvError::Empty)));
+    }
 }

@@ -347,4 +347,296 @@ mod tests {
                 .all(|s| s.status == Status::Starting)
         );
     }
+    #[test]
+    fn every_status_pair_obeys_the_transition_contract() {
+        let states = [
+            Status::Starting,
+            Status::Running,
+            Status::Cancelling,
+            Status::Exited,
+            Status::Failed,
+            Status::Interrupted,
+        ];
+        // Rows are source states, columns destination states, in the order above.
+        // Diagonal entries exercise exact replay, not a fresh transition.
+        let allowed = [
+            [true, true, false, false, true, true],
+            [false, true, true, true, true, true],
+            [false, false, true, true, true, true],
+            [false, false, false, true, false, false],
+            [false, false, false, false, true, false],
+            [false, false, false, false, false, true],
+        ];
+        let db = database();
+        for (i, from) in states.iter().enumerate() {
+            for (j, to) in states.iter().enumerate() {
+                let mut record = create(&db, launch()).unwrap();
+                record.status = from.clone();
+                save(&db, &record).unwrap();
+                let result = set(
+                    &db,
+                    &record.launch.id,
+                    &record.generation,
+                    to.clone(),
+                    None,
+                    None,
+                );
+                assert_eq!(
+                    result.is_ok(),
+                    allowed[i][j],
+                    "{from:?} -> {to:?}: {result:?}"
+                );
+                let actual = get(&db, &record.launch.id).unwrap().unwrap();
+                assert_eq!(
+                    actual.status,
+                    if allowed[i][j] {
+                        to.clone()
+                    } else {
+                        from.clone()
+                    }
+                );
+                assert_eq!(actual.generation, record.generation);
+            }
+        }
+    }
+
+    #[test]
+    fn all_terminal_payloads_allow_exact_replay_but_reject_revisions() {
+        let db = database();
+        for status in [Status::Exited, Status::Failed, Status::Interrupted] {
+            let mut record = create(&db, launch()).unwrap();
+            record.status = status.clone();
+            record.exit_code = Some(17);
+            record.error = Some("original evidence".into());
+            save(&db, &record).unwrap();
+            assert!(
+                set(
+                    &db,
+                    &record.launch.id,
+                    "wrong-generation",
+                    status.clone(),
+                    record.exit_code,
+                    record.error.clone()
+                )
+                .is_err()
+            );
+            set(
+                &db,
+                &record.launch.id,
+                &record.generation,
+                status.clone(),
+                record.exit_code,
+                record.error.clone(),
+            )
+            .unwrap();
+            assert!(
+                set(
+                    &db,
+                    &record.launch.id,
+                    &record.generation,
+                    status.clone(),
+                    Some(18),
+                    record.error.clone()
+                )
+                .is_err()
+            );
+            assert!(
+                set(
+                    &db,
+                    &record.launch.id,
+                    &record.generation,
+                    status,
+                    record.exit_code,
+                    None
+                )
+                .is_err()
+            );
+            assert_eq!(
+                serde_json::to_value(get(&db, &record.launch.id).unwrap().unwrap()).unwrap(),
+                serde_json::to_value(record).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn missing_and_malformed_records_fail_without_overwriting_evidence() {
+        let mut db = database();
+        assert!(get(&db, "missing").unwrap().is_none());
+        assert!(
+            set(&db, "missing", "generation", Status::Running, None, None)
+                .unwrap_err()
+                .to_string()
+                .contains("not found")
+        );
+        let good = create(&db, launch()).unwrap();
+        let invalid = launch();
+        db.execute(
+            "INSERT INTO sessions(id,value) VALUES(?1,?2)",
+            params![invalid.id, "{broken-json"],
+        )
+        .unwrap();
+        assert!(get(&db, &invalid.id).is_err());
+        assert!(list(&db).is_err());
+        assert!(create(&db, invalid.clone()).is_err());
+        assert!(set(&db, &invalid.id, "generation", Status::Running, None, None).is_err());
+        assert!(initialize(&mut db).is_err());
+        assert_eq!(
+            get(&db, &good.launch.id).unwrap().unwrap().status,
+            Status::Starting
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT value FROM sessions WHERE id=?1",
+                [&invalid.id],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "{broken-json"
+        );
+    }
+
+    #[test]
+    fn invalid_launch_never_creates_a_row() {
+        let db = database();
+        let mut cases = vec![];
+        let mut invalid = launch();
+        invalid.id = "not-a-uuid".into();
+        cases.push(invalid);
+        let mut invalid = launch();
+        invalid.program.clear();
+        cases.push(invalid);
+        let mut invalid = launch();
+        invalid.cwd = "relative/path".into();
+        cases.push(invalid);
+        let mut invalid = launch();
+        invalid.args = vec!["arg".into(); 257];
+        cases.push(invalid);
+        for invalid in cases {
+            assert!(create(&db, invalid).is_err());
+        }
+        assert!(list(&db).unwrap().is_empty());
+    }
+
+    #[test]
+    fn disk_reopen_preserves_generation_and_terminal_payload_and_recovers_active() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("state.db");
+        let (active, terminal) = {
+            let mut db = Connection::open(&path).unwrap();
+            initialize(&mut db).unwrap();
+            assert_eq!(
+                db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
+                    .unwrap(),
+                SCHEMA_VERSION
+            );
+            let active = create(&db, launch()).unwrap();
+            let terminal = create(&db, launch()).unwrap();
+            set(
+                &db,
+                &terminal.launch.id,
+                &terminal.generation,
+                Status::Failed,
+                None,
+                Some("launch failed".into()),
+            )
+            .unwrap();
+            (active, get(&db, &terminal.launch.id).unwrap().unwrap())
+        };
+        let mut db = Connection::open(&path).unwrap();
+        initialize(&mut db).unwrap();
+        let recovered = get(&db, &active.launch.id).unwrap().unwrap();
+        assert_eq!(recovered.generation, active.generation);
+        assert_eq!(recovered.status, Status::Interrupted);
+        assert!(recovered.error.unwrap().contains("host restarted"));
+        assert_eq!(
+            serde_json::to_value(get(&db, &terminal.launch.id).unwrap().unwrap()).unwrap(),
+            serde_json::to_value(&terminal).unwrap()
+        );
+        initialize(&mut db).unwrap();
+        assert_eq!(list(&db).unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn actor_concurrent_duplicate_creation_is_one_generation() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Store::open(&temp.path().join("state.db")).await.unwrap();
+        let original = launch();
+        let mut tasks = tokio::task::JoinSet::new();
+        for _ in 0..80 {
+            let store = store.clone();
+            let launch = original.clone();
+            tasks.spawn(async move { store.create(launch).await.unwrap() });
+        }
+        let mut generations = std::collections::HashSet::new();
+        while let Some(result) = tasks.join_next().await {
+            generations.insert(result.unwrap().generation);
+        }
+        assert_eq!(generations.len(), 1);
+        let rows = store.list().await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].launch, original);
+        store
+            .set(
+                &original.id,
+                &rows[0].generation,
+                Status::Running,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(store.list().await.unwrap()[0].status, Status::Running);
+        let mut conflicting = original;
+        conflicting.program = "other-program".into();
+        assert!(store.create(conflicting).await.is_err());
+        assert!(
+            store
+                .set("missing", "missing", Status::Failed, None, None)
+                .await
+                .is_err()
+        );
+        // A failed command does not stop the database worker.
+        assert_eq!(store.list().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn actor_startup_errors_are_reported_without_hanging_or_rewriting() {
+        let temp = tempfile::tempdir().unwrap();
+        assert!(Store::open(temp.path()).await.is_err());
+        let path = temp.path().join("future.db");
+        {
+            let db = Connection::open(&path).unwrap();
+            db.execute_batch("PRAGMA user_version=999").unwrap();
+        }
+        let result = tokio::time::timeout(std::time::Duration::from_secs(2), Store::open(&path))
+            .await
+            .unwrap();
+        assert!(result.is_err());
+        let db = Connection::open(&path).unwrap();
+        assert_eq!(
+            db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
+                .unwrap(),
+            999
+        );
+    }
+
+    #[tokio::test]
+    async fn actor_propagates_closed_mailbox_and_dropped_reply() {
+        let (tx, rx) = mpsc::channel(1);
+        let store = Store(tx);
+        drop(rx);
+        assert!(store.list().await.is_err());
+        assert!(store.create(launch()).await.is_err());
+        assert!(
+            store
+                .set("id", "generation", Status::Failed, None, None)
+                .await
+                .is_err()
+        );
+        let (tx, mut rx) = mpsc::channel(1);
+        let store = Store(tx);
+        let request = tokio::spawn(async move { store.list().await });
+        drop(rx.recv().await.unwrap());
+        assert!(request.await.unwrap().is_err());
+    }
 }
