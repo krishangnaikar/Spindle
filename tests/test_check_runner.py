@@ -31,7 +31,8 @@ class CheckRunnerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         receipt = self.receipt("success")
         self.assertEqual(receipt["argv"], command)
-        self.assertEqual(receipt["cwd"], str(self.root))
+        # Windows may supply an 8.3 temp path; the runner records its canonical path.
+        self.assertEqual(receipt["cwd"], str(self.root.resolve()))
         self.assertEqual(receipt["exit_code"], 0)
         self.assertGreaterEqual(receipt["elapsed_seconds"], 0)
         start = datetime.datetime.fromisoformat(receipt["started_utc"])

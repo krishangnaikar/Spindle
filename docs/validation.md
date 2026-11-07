@@ -19,6 +19,9 @@ Storage tests include an injected recovery-write failure and verify transaction 
 
 ## Failures preserved during development
 
+- Combined CI [42417582825](https://github.com/krishangnaikar/Spindle/actions/runs/42417582825): Linux passed; Windows portable Rust tests passed, then the Python cwd assertion compared a canonical `runneradmin` path with an equivalent short `RUNNER~1` path. The assertion now resolves the expected path as the runner does. This was a test expectation error, not a failed command or missing directory. Windows PTY execution was skipped after that failure; a follow-up run must verify it. The failed-step log is retained separately.
+
+
 - Strict lint follow-ups found `int_plus_one` in a host assertion and `needless_question_mark` in the prompt reader. Both were corrected without lint suppressions; failures remain in `units-clippy` and `integrated-clippy-v1`, followed by successful `final-clippy`.
 - Review found opening a FIFO prompt could block before file-type validation. The Unix prompt reader now uses nonblocking open and descriptor checks, with FIFO/symlink regression coverage. This was a code-review finding, not an observed production hang.
 - One host fixture initially inherited a public temporary-parent mode and failed the intended private-directory check. The fixture was made private; the access check remains unchanged. Both runs are retained (`unit-host-verified`, `unit-host-final`).
